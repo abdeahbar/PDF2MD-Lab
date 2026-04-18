@@ -214,6 +214,12 @@ The provider abstraction is in `app/services/ocr_provider.py`. `ChandraHFProvide
 - export bundles
 - search across processed markdown
 
+## License
+
+This repository's source code is released under the MIT License. See [LICENSE](LICENSE).
+
+Chandra OCR, Hugging Face Transformers, PyMuPDF, Streamlit, and the Chandra model weights are third-party components with their own licenses. Model files are not included in this repository.
+
 ## References
 
 - Chandra OCR GitHub documentation: https://github.com/datalab-to/chandra
