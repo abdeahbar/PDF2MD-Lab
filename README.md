@@ -1,4 +1,6 @@
-# Chandra Batch OCR MVP
+# PDF2MD-Lab
+
+Chandra Batch OCR MVP
 
 A local-first Windows desktop web app for running Chandra OCR over folders of PDFs. The app uses Streamlit for the UI, SQLite for job persistence, PyMuPDF for PDF previews, and Chandra OCR with the Hugging Face method as the active backend.
 
