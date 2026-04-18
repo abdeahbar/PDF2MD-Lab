@@ -188,6 +188,15 @@ Connect to the internet once and run:
 python scripts\download_model.py --repo-id datalab-to/chandra-ocr-2 --local-dir models\chandra-ocr-2
 ```
 
+If the download appears stuck on `model.safetensors`, stop it with `Ctrl+C` and rerun the same command. The script disables Hugging Face's Xet backend by default because it can stall on some Windows networks, and Hugging Face resumes already downloaded files where possible.
+
+For higher Hugging Face rate limits, set a token before running the download:
+
+```powershell
+$env:HF_TOKEN="your_huggingface_token"
+python scripts\download_model.py --repo-id datalab-to/chandra-ocr-2 --local-dir models\chandra-ocr-2
+```
+
 ### CUDA out of memory
 
 Keep safe mode enabled, keep batch size at 1, and keep max parallel jobs at 1. Close other GPU-heavy apps before running a batch.
