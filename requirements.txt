@@ -1,0 +1,7 @@
+streamlit>=1.50.0
+pandas>=2.2.0
+PyMuPDF>=1.24.10
+huggingface_hub>=0.30.0
+chandra-ocr[hf]>=0.2.0
+watchdog>=4.0.0
+
