@@ -139,18 +139,20 @@ def render_sidebar(config: AppConfig, store: JobStore) -> tuple[str, str, OCRSet
     input_col, input_browse_col = st.sidebar.columns([4, 1])
     input_folder = input_col.text_input("Input folder", value=input_default or "", placeholder="C:\\path\\to\\pdfs")
     if input_browse_col.button("...", key="browse_input", help="Browse for input folder"):
-        selected = choose_folder(input_folder or str(ROOT))
+        selected = choose_folder(input_folder or str(ROOT), title="Select input folder")
         if selected:
             store.set_value("input_folder", selected)
             st.rerun()
+        st.sidebar.info("No folder selected. You can paste a folder path above.")
 
     output_col, output_browse_col = st.sidebar.columns([4, 1])
     output_folder = output_col.text_input("Output folder", value=output_default, placeholder="outputs")
     if output_browse_col.button("...", key="browse_output", help="Browse for output folder"):
-        selected = choose_folder(output_folder or str(config.output_dir))
+        selected = choose_folder(output_folder or str(config.output_dir), title="Select output folder")
         if selected:
             store.set_value("output_folder", selected)
             st.rerun()
+        st.sidebar.info("No folder selected. You can paste a folder path above.")
 
     store.set_value("input_folder", input_folder)
     store.set_value("output_folder", output_folder)
