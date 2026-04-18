@@ -112,15 +112,23 @@ outputs/
       invoice_001/
         invoice_001.md
         invoice_001.html
-        invoice_001_metadata.json
+        metadata.json
         processing.log
-        image_*.png
         images/
           image_*.png
   output_mapping.json
 ```
 
 Chandra writes Markdown, HTML, metadata JSON, and extracted images when available. The app keeps logs beside the output so failed files can be diagnosed without stopping the queue. `output_mapping.json` maps each source PDF to its mirrored output folder and generated preview files.
+
+Required mapping fields:
+
+- `original_pdf_path`
+- `relative_input_path`
+- `mirrored_output_path`
+- `markdown_path`
+- `html_path`
+- `status`
 
 ## Offline Mode
 

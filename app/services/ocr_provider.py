@@ -70,7 +70,7 @@ class ChandraHFProvider(OCRProvider):
             shutil.rmtree(temp_parent)
         temp_parent.mkdir(parents=True, exist_ok=True)
 
-        log_path = job.log_path or (job.output_dir / "ocr.log")
+        log_path = job.log_path or (job.output_dir / "processing.log")
         command = self._build_command(job.source_pdf, temp_parent, settings)
         env = self._build_environment(settings)
         page_count = job.page_count
@@ -145,7 +145,7 @@ class ChandraHFProvider(OCRProvider):
         if return_code != 0:
             return OCRRunResult(
                 status=JobStatus.FAILED,
-                error_text=last_error or f"Chandra exited with code {return_code}. See ocr.log for details.",
+                error_text=last_error or f"Chandra exited with code {return_code}. See processing.log for details.",
                 markdown_path=markdown_path,
                 html_path=html_path,
                 metadata_path=metadata_path,
@@ -156,7 +156,7 @@ class ChandraHFProvider(OCRProvider):
         if not markdown_path or not markdown_path.exists():
             return OCRRunResult(
                 status=JobStatus.FAILED,
-                error_text=last_error or "Chandra finished but no markdown output was produced. See ocr.log for details.",
+                error_text=last_error or "Chandra finished but no markdown output was produced. See processing.log for details.",
                 html_path=html_path,
                 metadata_path=metadata_path,
                 page_count=page_count,
@@ -238,19 +238,36 @@ class ChandraHFProvider(OCRProvider):
         if temp_parent.exists():
             shutil.rmtree(temp_parent, ignore_errors=True)
 
-        self._copy_images_to_folder(job.output_dir)
-        markdown_path = self._first_existing(job.output_dir.glob("*.md"))
-        html_path = self._first_existing(job.output_dir.glob("*.html"))
-        metadata_path = self._first_existing(job.output_dir.glob("*_metadata.json"))
+        markdown_path, html_path, metadata_path = self._normalize_output_files(job.output_dir, job.source_pdf.stem)
         return markdown_path, html_path, metadata_path
 
     @staticmethod
-    def _first_existing(paths: object) -> Path | None:
+    def _first_existing(paths: object, *, exclude_dirs: bool = True) -> Path | None:
         for path in paths:  # type: ignore[assignment]
             candidate = Path(path)
-            if candidate.exists():
+            if candidate.exists() and not (exclude_dirs and candidate.is_dir()):
                 return candidate
         return None
+
+    def _normalize_output_files(self, output_dir: Path, source_stem: str) -> tuple[Path | None, Path | None, Path | None]:
+        markdown_path = self._first_existing([output_dir / f"{source_stem}.md"]) or self._first_existing(output_dir.glob("*.md"))
+        html_path = self._first_existing([output_dir / f"{source_stem}.html"]) or self._first_existing(output_dir.glob("*.html"))
+        metadata_path = self._normalize_metadata(output_dir, source_stem)
+        moved_images = self._move_images_to_folder(output_dir)
+        self._rewrite_image_references([markdown_path, html_path], moved_images)
+        return markdown_path, html_path, metadata_path
+
+    def _normalize_metadata(self, output_dir: Path, source_stem: str) -> Path | None:
+        target = output_dir / "metadata.json"
+        candidates = [
+            output_dir / f"{source_stem}_metadata.json",
+            *sorted(output_dir.glob("*_metadata.json")),
+        ]
+        source = self._first_existing(candidates)
+        if not source:
+            return target if target.exists() else None
+        source.replace(target)
+        return target
 
     @staticmethod
     def _read_metadata_page_count(metadata_path: Path | None) -> int | None:
@@ -264,15 +281,33 @@ class ChandraHFProvider(OCRProvider):
         return int(page_count) if page_count else None
 
     @staticmethod
-    def _copy_images_to_folder(output_dir: Path) -> None:
+    def _move_images_to_folder(output_dir: Path) -> dict[str, str]:
         image_suffixes = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".tif", ".tiff", ".bmp"}
         images_dir = output_dir / "images"
+        moved: dict[str, str] = {}
         for image_path in output_dir.iterdir():
             if image_path.is_file() and image_path.suffix.lower() in image_suffixes:
                 images_dir.mkdir(exist_ok=True)
                 destination = images_dir / image_path.name
-                if not destination.exists():
-                    shutil.copy2(image_path, destination)
+                if destination.exists():
+                    destination.unlink()
+                image_path.replace(destination)
+                moved[image_path.name] = f"images/{image_path.name}"
+        return moved
+
+    @staticmethod
+    def _rewrite_image_references(paths: list[Path | None], moved_images: dict[str, str]) -> None:
+        if not moved_images:
+            return
+        for path in paths:
+            if not path or not path.exists():
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            updated = text
+            for filename, relative_path in moved_images.items():
+                updated = re.sub(rf'(?<!images/){re.escape(filename)}', relative_path, updated)
+            if updated != text:
+                path.write_text(updated, encoding="utf-8")
 
     @staticmethod
     def _append_log(log_path: Path, text: str) -> None:
