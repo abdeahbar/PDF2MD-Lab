@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+
+from app.models.job import OCRSettings
 from app.services.ocr_provider import ChandraHFProvider
 
 
@@ -21,3 +24,11 @@ def test_normalize_output_files_creates_required_layout(tmp_path):
     assert "images/page_1.png" in markdown_path.read_text(encoding="utf-8")
     assert "images/page_1.png" in html_path.read_text(encoding="utf-8")
 
+
+def test_build_command_uses_current_python_interpreter(tmp_path):
+    source_pdf = tmp_path / "file.pdf"
+    output_parent = tmp_path / "out"
+
+    command = ChandraHFProvider()._build_command(source_pdf, output_parent, OCRSettings())
+
+    assert command[:3] == [sys.executable, "-m", "chandra.scripts.cli"]

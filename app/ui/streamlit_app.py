@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
-import time
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -48,6 +47,16 @@ def inject_css() -> None:
             border-radius: 0.5rem;
             padding: 0.75rem 0.9rem;
             background: #ffffff;
+            color: #111827;
+        }
+        div[data-testid="stMetric"] label,
+        div[data-testid="stMetric"] p,
+        div[data-testid="stMetric"] div {
+            color: #111827 !important;
+        }
+        div[data-testid="stMetricLabel"],
+        div[data-testid="stMetricLabel"] p {
+            color: #475467 !important;
         }
         .small-muted {
             color: #667085;
@@ -130,6 +139,16 @@ def copy_markdown_button(markdown_text: str) -> None:
     )
 
 
+def open_folder_with_feedback(path: Path, *, error_container: Any | None = None) -> None:
+    container = error_container or st
+    try:
+        opened = open_folder(path)
+    except Exception as exc:
+        container.error(f"Could not open folder: {exc}")
+    else:
+        st.toast(f"Opened {opened}")
+
+
 def render_sidebar(config: AppConfig, store: JobStore) -> tuple[str, str, OCRSettings, bool]:
     st.sidebar.header("Folders")
 
@@ -158,7 +177,7 @@ def render_sidebar(config: AppConfig, store: JobStore) -> tuple[str, str, OCRSet
     store.set_value("output_folder", output_folder)
 
     if st.sidebar.button("Open output folder", use_container_width=True):
-        open_folder(resolve_project_path(output_folder))
+        open_folder_with_feedback(resolve_project_path(output_folder), error_container=st.sidebar)
 
     st.sidebar.divider()
     st.sidebar.header("Settings")
@@ -236,6 +255,7 @@ def render_sidebar(config: AppConfig, store: JobStore) -> tuple[str, str, OCRSet
 def render_metrics(store: JobStore, manager: QueueManager) -> dict[str, int]:
     counts = store.count_by_status()
     total = counts.get("total", 0)
+    worker_count = manager.worker_count()
     finished = (
         counts.get(JobStatus.COMPLETED.value, 0)
         + counts.get(JobStatus.FAILED.value, 0)
@@ -252,9 +272,9 @@ def render_metrics(store: JobStore, manager: QueueManager) -> dict[str, int]:
 
     progress = finished / total if total else 0
     st.progress(progress, text=f"Batch progress: {finished}/{total} finished")
-    st.caption(
-        f"Workers: {manager.worker_count()} | Queue is {'paused' if manager.paused else 'ready'}"
-    )
+    st.caption(f"Workers: {worker_count} | Queue is {'paused' if manager.paused else 'ready'}")
+    if counts.get(JobStatus.QUEUED.value, 0) and worker_count == 0:
+        st.warning("Queued PDFs are waiting, but no worker is running. Click Start to begin processing.")
     return counts
 
 
@@ -291,7 +311,9 @@ def render_discovery(input_folder: str, output_folder: str, settings: OCRSetting
         try:
             if not input_folder.strip():
                 raise ValueError("Choose an input folder before scanning.")
-            discovered = discover_pdfs(resolve_project_path(input_folder))
+            input_root = resolve_project_path(input_folder)
+            with st.spinner(f"Scanning {input_root}"):
+                discovered = discover_pdfs(input_root)
         except Exception as exc:
             st.error(str(exc))
             discovered = []
@@ -299,12 +321,14 @@ def render_discovery(input_folder: str, output_folder: str, settings: OCRSetting
             {
                 "Select": True,
                 "File": item.path.name,
-                "Pages": item.page_count,
+                "Pages": item.page_count if item.page_count is not None else "",
                 "Size MB": item.size_mb,
                 "Path": str(item.path),
             }
             for item in discovered
         ]
+        if discovered:
+            st.success(f"Found {len(discovered)} PDF(s).")
 
     discovered_rows = st.session_state.get("discovered_pdfs", [])
     if not discovered_rows:
@@ -364,6 +388,13 @@ def jobs_dataframe(jobs: list[JobRecord]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def jobs_for_statuses(store: JobStore, statuses: list[JobStatus]) -> list[JobRecord]:
+    jobs: list[JobRecord] = []
+    for status in statuses:
+        jobs.extend(store.list_jobs(status.value))
+    return sorted(jobs, key=lambda job: job.created_at, reverse=True)
+
+
 def render_active_document(store: JobStore) -> None:
     running = store.get_running_jobs()
     if not running:
@@ -376,22 +407,74 @@ def render_active_document(store: JobStore) -> None:
 
 
 def render_jobs(store: JobStore) -> JobRecord | None:
-    st.subheader("Queue")
-    status_options = [
-        "all",
-        JobStatus.QUEUED.value,
-        JobStatus.RUNNING.value,
-        JobStatus.COMPLETED.value,
-        JobStatus.FAILED.value,
-        JobStatus.CANCELLED.value,
-        JobStatus.INTERRUPTED.value,
-    ]
-    status_filter = st.radio("Filter", status_options, horizontal=True, label_visibility="collapsed")
-    jobs = store.list_jobs(None if status_filter == "all" else status_filter)
-    if not jobs:
-        st.info("No jobs in this filter.")
+    queue_jobs = jobs_for_statuses(
+        store,
+        [
+            JobStatus.RUNNING,
+            JobStatus.QUEUED,
+            JobStatus.FAILED,
+            JobStatus.INTERRUPTED,
+            JobStatus.CANCELLED,
+        ],
+    )
+    completed_jobs = store.list_jobs(JobStatus.COMPLETED.value)
+
+    selected_queue_id = render_jobs_table(
+        "Queued PDFs",
+        queue_jobs,
+        key="queue_jobs_table",
+        empty_message="No queued, running, failed, interrupted, or cancelled PDFs.",
+    )
+    selected_completed_id = render_jobs_table(
+        "Completed PDFs",
+        completed_jobs,
+        key="completed_jobs_table",
+        empty_message="No completed PDFs yet.",
+    )
+
+    if selected_queue_id:
+        st.session_state["selected_job_id"] = selected_queue_id
+        st.session_state["inspect_completed_pdfs"] = False
+    if selected_completed_id:
+        st.session_state["selected_job_id"] = selected_completed_id
+        st.session_state["inspect_completed_pdfs"] = True
+
+    inspect_completed = st.toggle(
+        "Inspect completed PDFs",
+        key="inspect_completed_pdfs",
+        help="Turn this off to inspect only queued, running, failed, interrupted, or cancelled PDFs below.",
+    )
+    inspect_jobs = completed_jobs if inspect_completed else queue_jobs
+    if not inspect_jobs:
+        st.info("No completed PDFs to inspect." if inspect_completed else "No queued PDFs to inspect.")
         return None
 
+    selected_job_id = st.session_state.get("selected_job_id")
+    inspect_ids = [job.id for job in inspect_jobs]
+    selected_index = inspect_ids.index(selected_job_id) if selected_job_id in inspect_ids else 0
+    job_lookup = {job.id: job for job in inspect_jobs}
+    selected_id = st.selectbox(
+        "Inspect document",
+        inspect_ids,
+        index=selected_index,
+        format_func=lambda job_id: f"{job_lookup[job_id].filename} ({job_lookup[job_id].status})",
+        key=f"inspect_document_{'completed' if inspect_completed else 'queue'}",
+    )
+    st.session_state["selected_job_id"] = selected_id
+    return job_lookup[selected_id]
+
+
+def render_jobs_table(
+    title: str,
+    jobs: list[JobRecord],
+    *,
+    key: str,
+    empty_message: str,
+) -> str | None:
+    st.markdown(f"**{title}**")
+    if not jobs:
+        st.info(empty_message)
+        return None
     table_df = jobs_dataframe(jobs)
     event = st.dataframe(
         table_df,
@@ -399,22 +482,13 @@ def render_jobs(store: JobStore) -> JobRecord | None:
         use_container_width=True,
         on_select="rerun",
         selection_mode="single-row",
+        key=key,
         column_config={"id": None, "Output": st.column_config.TextColumn("Output", width="large")},
     )
     rows = selected_rows(event)
     if rows:
-        st.session_state["selected_job_id"] = table_df.iloc[rows[0]]["id"]
-
-    selected_job_id = st.session_state.get("selected_job_id")
-    if selected_job_id:
-        try:
-            return store.get_job(selected_job_id)
-        except KeyError:
-            st.session_state.pop("selected_job_id", None)
-
-    labels = [f"{job.filename} ({job.status})" for job in jobs]
-    selected_label = st.selectbox("Inspect document", labels, index=0)
-    return jobs[labels.index(selected_label)]
+        return str(table_df.iloc[rows[0]]["id"])
+    return None
 
 
 def render_html_preview(html_text: str) -> None:
@@ -428,10 +502,14 @@ def render_html_preview(html_text: str) -> None:
         <head>
           <meta charset="utf-8">
           <style>
+            html {{
+                background: #ffffff;
+            }}
             body {{
                 font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
                 line-height: 1.5;
                 color: #111827;
+                background: #ffffff;
                 margin: 0;
                 padding: 1rem;
             }}
@@ -482,7 +560,7 @@ def render_detail(job: JobRecord | None) -> None:
     with right:
         open_col, path_col = st.columns([1, 3])
         if open_col.button("Open output", key=f"open_{job.id}", use_container_width=True):
-            open_folder(job.output_dir)
+            open_folder_with_feedback(job.output_dir)
         path_col.caption(str(job.output_dir))
 
         markdown_text = read_text_file(job.markdown_path, limit_chars=500_000)
@@ -529,24 +607,36 @@ def main() -> None:
     st.title("Chandra Batch OCR")
     st.caption("Local-first PDF OCR queue for Windows. Chandra HF is the active provider; vLLM is left for a future optional mode.")
 
+    st.divider()
+    render_discovery(input_folder, output_folder, settings, store)
+
+    st.divider()
+    st.subheader("Live Queue")
+    if auto_refresh:
+        render_live_queue(store, manager, settings)
+    else:
+        render_queue_workspace(store, manager, settings)
+
+
+def render_queue_workspace(store: JobStore, manager: QueueManager, settings: OCRSettings) -> None:
     counts = render_metrics(store, manager)
     render_controls(store, manager, settings)
 
     st.divider()
-    top_left, top_right = st.columns([1, 1], gap="large")
-    with top_left:
-        render_discovery(input_folder, output_folder, settings, store)
-    with top_right:
-        render_active_document(store)
+    render_active_document(store)
 
     st.divider()
     selected_job = render_jobs(store)
     render_detail(selected_job)
 
     queue_active = counts.get(JobStatus.RUNNING.value, 0) > 0 or counts.get(JobStatus.QUEUED.value, 0) > 0
-    if auto_refresh and queue_active:
-        time.sleep(max(1, int(config.refresh_seconds)))
-        st.rerun()
+    if not queue_active:
+        st.caption("No queued or running documents.")
+
+
+@st.fragment(run_every="2s")
+def render_live_queue(store: JobStore, manager: QueueManager, settings: OCRSettings) -> None:
+    render_queue_workspace(store, manager, settings)
 
 
 if __name__ == "__main__":

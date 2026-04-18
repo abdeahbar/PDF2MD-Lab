@@ -183,12 +183,9 @@ class ChandraHFProvider(OCRProvider):
                 raise RuntimeError("Model is not downloaded yet. Connect to internet once and run setup.")
 
     def _build_command(self, source_pdf: Path, output_parent: Path, settings: OCRSettings) -> list[str]:
-        chandra_exe = shutil.which("chandra")
-        if chandra_exe:
-            command = [chandra_exe]
-        else:
-            command = [sys.executable, "-m", "chandra.scripts.cli"]
-
+        # Keep Chandra on the same Python environment that Streamlit is using.
+        # A PATH-level chandra.exe can point at a CPU-only torch install.
+        command = [sys.executable, "-m", "chandra.scripts.cli"]
         command.extend([str(source_pdf), str(output_parent), "--method", "hf"])
         command.extend(["--batch-size", str(settings.batch_size)])
         command.append("--include-images" if settings.include_images else "--no-images")

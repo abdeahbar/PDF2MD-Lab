@@ -43,7 +43,9 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip download -r requirements.txt -d vendor\wheels
+python -m pip download torch==2.11.0+cu128 torchvision==0.26.0+cu128 -d vendor\wheels --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
 python -m pip install -r requirements.txt
+python -m pip install --upgrade --force-reinstall torch==2.11.0+cu128 torchvision==0.26.0+cu128 --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
 python scripts\download_model.py --repo-id datalab-to/chandra-ocr-2 --local-dir models\chandra-ocr-2
 ```
 
@@ -52,6 +54,8 @@ You can also run the bundled setup script:
 ```powershell
 .\scripts\setup_windows.ps1
 ```
+
+The setup script installs the CUDA 12.8 PyTorch wheel by default for NVIDIA GPUs. Use `.\scripts\setup_windows.ps1 -CpuTorch` only on a machine where CPU-only OCR is intentional.
 
 The `pip download` step creates a local wheel cache under `vendor\wheels` so dependencies can be installed again later without internet.
 
@@ -63,6 +67,7 @@ If the venv needs to be recreated while offline and `vendor\wheels` is already p
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --no-index --find-links vendor\wheels -r requirements.txt
+python -m pip install --no-index --find-links vendor\wheels --force-reinstall torch==2.11.0+cu128 torchvision==0.26.0+cu128
 ```
 
 The model should already be present in:
@@ -200,6 +205,27 @@ python scripts\download_model.py --repo-id datalab-to/chandra-ocr-2 --local-dir 
 ### CUDA out of memory
 
 Keep safe mode enabled, keep batch size at 1, and keep max parallel jobs at 1. Close other GPU-heavy apps before running a batch.
+
+### Chandra uses CPU instead of GPU
+
+Check what PyTorch can see from the project folder:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no cuda')"
+```
+
+If the version ends with `+cpu` or CUDA is `False`, replace the CPU wheel with the CUDA wheel:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install --upgrade --force-reinstall torch==2.11.0+cu128 torchvision==0.26.0+cu128 --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
+```
+
+Restart Streamlit after reinstalling PyTorch. Chandra's HF backend uses `device_map="auto"`, so once CUDA is visible to PyTorch it should load on the NVIDIA GPU. To force the Chandra subprocess to the first GPU, start Streamlit from a shell where this is set:
+
+```powershell
+$env:TORCH_DEVICE="cuda:0"
+.\scripts\run_app.ps1
+```
 
 ### Streamlit cannot open a folder dialog
 

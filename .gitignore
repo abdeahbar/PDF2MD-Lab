@@ -24,6 +24,7 @@ local.env
 .env.*
 
 # Streamlit local state
+.streamlit/
 .streamlit/secrets.toml
 
 # SQLite/runtime state
@@ -42,6 +43,11 @@ outputs/*
 # Local model files can be very large
 models/*
 !models/.gitkeep
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
 
 # Offline dependency cache
 vendor/
@@ -59,4 +65,3 @@ Thumbs.db
 desktop.ini
 .idea/
 .vscode/
-

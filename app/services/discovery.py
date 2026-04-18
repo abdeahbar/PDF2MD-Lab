@@ -13,7 +13,11 @@ class DiscoveredPDF:
     size_mb: float
 
 
-def discover_pdfs(input_folder: Path) -> list[DiscoveredPDF]:
+def discover_pdfs(
+    input_folder: Path,
+    *,
+    include_page_counts: bool = False,
+) -> list[DiscoveredPDF]:
     if not input_folder.exists():
         raise FileNotFoundError(f"Input folder does not exist: {input_folder}")
     if not input_folder.is_dir():
@@ -26,9 +30,8 @@ def discover_pdfs(input_folder: Path) -> list[DiscoveredPDF]:
             pdfs.append(
                 DiscoveredPDF(
                     path=path.resolve(),
-                    page_count=get_pdf_page_count(path),
+                    page_count=get_pdf_page_count(path) if include_page_counts else None,
                     size_mb=round(stat.st_size / (1024 * 1024), 2),
                 )
             )
     return pdfs
-
